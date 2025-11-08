@@ -24,6 +24,7 @@ from textual.reactive import reactive
 from textual.widgets import Input, Static
 
 from strix.interface.cli import run_cli
+from strix.interface.config_manager import ConfigManager
 from strix.interface.tui import run_tui
 from strix.interface.utils import (
     assign_workspace_subdirs,
@@ -487,7 +488,224 @@ async def prompt_input_async(prompt_text: str, description: str = "", allow_empt
     return await app.run_async()
 
 
-async def show_interactive_menu_async() -> argparse.Namespace:
+class ConfigurationApp(App):  # type: ignore[misc]
+    """Configuration management app."""
+    
+    CSS = """
+    Screen {
+        align: center middle;
+        background: #1a1a1a;
+    }
+    
+    #config-container {
+        width: 90;
+        height: auto;
+        border: solid #22c55e;
+        padding: 2;
+        background: #1a1a1a;
+    }
+    
+    #config-title {
+        text-align: center;
+        color: #22c55e;
+        text-style: bold;
+        margin-bottom: 1;
+    }
+    
+    #config-subtitle {
+        text-align: center;
+        color: #d4d4d4;
+        margin-bottom: 2;
+    }
+    
+    .config-field {
+        margin: 1 0;
+    }
+    
+    .config-label {
+        color: #d4d4d4;
+        margin-bottom: 1;
+    }
+    
+    .config-input {
+        width: 100%;
+        margin-bottom: 1;
+    }
+    
+    .config-description {
+        color: #a8a29e;
+        margin-top: 1;
+        margin-bottom: 1;
+    }
+    
+    #config-footer {
+        text-align: center;
+        padding: 1;
+        margin-top: 2;
+        border-top: solid #22c55e;
+        color: #a8a29e;
+    }
+    """
+    
+    BINDINGS = [
+        Binding("escape", "quit", "Back to Menu", priority=True),
+        Binding("ctrl+s", "save", "Save", priority=True),
+        Binding("up", "move_up", "Move Up", priority=True),
+        Binding("down", "move_down", "Move Down", priority=True),
+    ]
+    
+    def __init__(self) -> None:
+        super().__init__()
+        self.config_manager = ConfigManager()
+        self._inputs: dict[str, Input] = {}
+        self._input_order: list[str] = []
+    
+    def compose(self) -> ComposeResult:
+        config = self.config_manager.get_all_config()
+        
+        with Container(id="config-container"):
+            yield Static("🦉 STRIX CONFIGURATION", id="config-title")
+            yield Static("Manage your Strix settings", id="config-subtitle")
+            
+            # STRIX_LLM
+            yield Static("Model Name (STRIX_LLM)", classes="config-label")
+            yield Static("Example: openai/gpt-5, anthropic/claude-3-5-sonnet", classes="config-description")
+            llm_input = Input(
+                value=config.get("STRIX_LLM", ""),
+                placeholder="openai/gpt-5",
+                id="strix_llm",
+                classes="config-input",
+            )
+            self._inputs["STRIX_LLM"] = llm_input
+            self._input_order.append("STRIX_LLM")
+            yield llm_input
+            
+            # LLM_API_KEY
+            yield Static("LLM API Key (LLM_API_KEY)", classes="config-label")
+            yield Static("Your API key for the LLM provider", classes="config-description")
+            api_key_input = Input(
+                value=config.get("LLM_API_KEY", ""),
+                placeholder="sk-...",
+                password=True,
+                id="llm_api_key",
+                classes="config-input",
+            )
+            self._inputs["LLM_API_KEY"] = api_key_input
+            self._input_order.append("LLM_API_KEY")
+            yield api_key_input
+            
+            # PERPLEXITY_API_KEY
+            yield Static("Perplexity API Key (PERPLEXITY_API_KEY)", classes="config-label")
+            yield Static("Optional: For web search capabilities", classes="config-description")
+            perplexity_input = Input(
+                value=config.get("PERPLEXITY_API_KEY", ""),
+                placeholder="pplx-...",
+                password=True,
+                id="perplexity_api_key",
+                classes="config-input",
+            )
+            self._inputs["PERPLEXITY_API_KEY"] = perplexity_input
+            self._input_order.append("PERPLEXITY_API_KEY")
+            yield perplexity_input
+            
+            # LLM_API_BASE (optional)
+            yield Static("LLM API Base URL (LLM_API_BASE)", classes="config-label")
+            yield Static("Optional: For local models (e.g., http://localhost:11434)", classes="config-description")
+            api_base_input = Input(
+                value=config.get("LLM_API_BASE", ""),
+                placeholder="http://localhost:11434",
+                id="llm_api_base",
+                classes="config-input",
+            )
+            self._inputs["LLM_API_BASE"] = api_base_input
+            self._input_order.append("LLM_API_BASE")
+            yield api_base_input
+            
+            yield Static("↑/↓: Navigate  |  Ctrl+S: Save  |  Esc: Back to Menu", id="config-footer")
+    
+    def on_mount(self) -> None:
+        """Focus the first input on mount."""
+        if self._inputs and self._input_order:
+            first_key = self._input_order[0]
+            self._inputs[first_key].focus()
+    
+    def _get_current_input_index(self) -> int:
+        """Get the index of the currently focused input."""
+        focused = self.focused
+        if isinstance(focused, Input):
+            for i, key in enumerate(self._input_order):
+                if self._inputs[key] == focused:
+                    return i
+        return 0
+    
+    def action_move_up(self) -> None:
+        """Move focus to the previous input."""
+        current_idx = self._get_current_input_index()
+        if current_idx > 0:
+            prev_key = self._input_order[current_idx - 1]
+            self._inputs[prev_key].focus()
+    
+    def action_move_down(self) -> None:
+        """Move focus to the next input."""
+        current_idx = self._get_current_input_index()
+        if current_idx < len(self._input_order) - 1:
+            next_key = self._input_order[current_idx + 1]
+            self._inputs[next_key].focus()
+    
+    def action_save(self) -> None:
+        """Save configuration."""
+        updates = {}
+        for key, input_widget in self._inputs.items():
+            value = input_widget.value.strip()
+            if value:  # Only save non-empty values
+                updates[key] = value
+            elif key in ["STRIX_LLM", "LLM_API_KEY"]:  # Required fields
+                # Keep existing value if not changed
+                existing = self.config_manager.get_value(key)
+                if existing:
+                    updates[key] = existing
+        
+        self.config_manager.update_config(updates)
+        self.config_manager.apply_to_environment()
+        
+        # Re-apply litellm settings immediately after saving
+        import litellm
+        if updates.get("LLM_API_KEY"):
+            litellm.api_key = updates["LLM_API_KEY"]
+        elif "LLM_API_KEY" in updates:  # Empty value - clear it
+            litellm.api_key = None
+        
+        if updates.get("LLM_API_BASE"):
+            litellm.api_base = updates["LLM_API_BASE"]
+        elif updates.get("OPENAI_API_BASE"):
+            litellm.api_base = updates["OPENAI_API_BASE"]
+        elif updates.get("LITELLM_BASE_URL"):
+            litellm.api_base = updates["LITELLM_BASE_URL"]
+        elif updates.get("OLLAMA_API_BASE"):
+            litellm.api_base = updates["OLLAMA_API_BASE"]
+        elif "LLM_API_BASE" in updates or "OPENAI_API_BASE" in updates:  # Empty value - clear it
+            litellm.api_base = None
+        
+        # Show success message
+        from rich.console import Console
+        console = Console()
+        console.print("\n[bold green]✓ Configuration saved successfully![/bold green]\n")
+        
+        self.exit(result=True)
+    
+    def action_quit(self) -> None:
+        """Quit without saving."""
+        self.exit(result=False)
+
+
+async def show_configuration_async() -> bool:
+    """Show configuration management screen."""
+    app = ConfigurationApp()
+    result = await app.run_async()
+    return result is True
+
+
+async def show_interactive_menu_async() -> argparse.Namespace | None:
     """Display an interactive menu using textual with arrow key navigation."""
     menu_options = [
         {
@@ -539,16 +757,90 @@ async def show_interactive_menu_async() -> argparse.Namespace:
             "targets": [],
             "instruction": None,
         },
+        {
+            "title": "Configuration",
+            "description": "Manage Strix settings (API keys, model, etc.)",
+            "example": "Configure STRIX_LLM, LLM_API_KEY, PERPLEXITY_API_KEY",
+            "targets": [],
+            "instruction": None,
+            "is_config": True,
+        },
     ]
     
-    app = InteractiveMenuApp(menu_options)
-    choice = await app.run_async()
+    while True:
+        app = InteractiveMenuApp(menu_options)
+        choice = await app.run_async()
+        
+        if choice is None:
+            return None
+        
+        # Check if configuration was selected
+        if choice == 8:  # Configuration option
+            await show_configuration_async()
+            # Return to menu after configuration
+            continue
+        
+        # Regular menu option selected
+        break
     
     console = Console()
     
     if choice is None:
         console.print("\n[bold yellow]Cancelled.[/bold yellow]\n")
         sys.exit(0)
+    
+    # Get menu options again (they might have been modified)
+    menu_options = [
+        {
+            "title": "Local codebase analysis",
+            "description": "Analyze a local directory for security vulnerabilities",
+            "example": "strix --target ./app-directory",
+            "targets": [],
+            "instruction": None,
+        },
+        {
+            "title": "Repository security review",
+            "description": "Clone and analyze a GitHub repository",
+            "example": "strix --target https://github.com/org/repo",
+            "targets": [],
+            "instruction": None,
+        },
+        {
+            "title": "Web application assessment",
+            "description": "Perform penetration testing on a deployed web application",
+            "example": "strix --target https://your-app.com",
+            "targets": [],
+            "instruction": None,
+        },
+        {
+            "title": "Multi-target white-box testing",
+            "description": "Test source code + deployed app simultaneously",
+            "example": "strix -t https://github.com/org/app -t https://your-app.com",
+            "targets": [],
+            "instruction": None,
+        },
+        {
+            "title": "Test multiple environments",
+            "description": "Test dev, staging, and production environments simultaneously",
+            "example": "strix -t https://dev.your-app.com -t https://staging.your-app.com -t https://prod.your-app.com",
+            "targets": [],
+            "instruction": None,
+        },
+        {
+            "title": "Focused testing with instructions",
+            "description": "Prioritize specific vulnerability types or testing approaches",
+            "example": "strix --target api.your-app.com --instruction \"Prioritize authentication and authorization testing\"",
+            "targets": [],
+            "instruction": None,
+        },
+        {
+            "title": "Testing with credentials",
+            "description": "Test with provided credentials, focus on privilege escalation",
+            "example": "strix --target https://your-app.com --instruction \"Test with credentials: testuser/testpass. Focus on privilege escalation and access control bypasses.\"",
+            "targets": [],
+            "instruction": None,
+        },
+    ]
     
     selected_option = menu_options[choice - 1]
     
@@ -657,7 +949,7 @@ async def show_interactive_menu_async() -> argparse.Namespace:
     return args
 
 
-def show_interactive_menu() -> argparse.Namespace:
+def show_interactive_menu() -> argparse.Namespace | None:
     """Display an interactive menu using textual with arrow key navigation."""
     return asyncio.run(show_interactive_menu_async())
 
@@ -873,6 +1165,23 @@ def pull_docker_image() -> None:
 def main() -> None:
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+    # Load configuration from ~/.strix/.env and apply to environment FIRST
+    # This must happen before any LLM modules are used
+    ConfigManager.apply_to_environment()
+    
+    # Re-apply litellm settings after loading config (in case llm.py was already imported)
+    config = ConfigManager.get_all_config()
+    if config.get("LLM_API_KEY"):
+        litellm.api_key = config["LLM_API_KEY"]
+    if config.get("LLM_API_BASE"):
+        litellm.api_base = config["LLM_API_BASE"]
+    elif config.get("OPENAI_API_BASE"):
+        litellm.api_base = config["OPENAI_API_BASE"]
+    elif config.get("LITELLM_BASE_URL"):
+        litellm.api_base = config["LITELLM_BASE_URL"]
+    elif config.get("OLLAMA_API_BASE"):
+        litellm.api_base = config["OLLAMA_API_BASE"]
 
     args = parse_arguments()
 
