@@ -448,7 +448,7 @@ def pull_docker_image() -> None:
     console.print()
 
 
-def main() -> None:  # noqa: PLR0912
+def main() -> None:  # noqa: PLR0912, PLR0915
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
@@ -473,8 +473,38 @@ def main() -> None:  # noqa: PLR0912
 
     args = parse_arguments()
 
-    # If no targets provided, show interactive menu
+    # If no targets provided, show interactive menu (unless non-interactive mode)
     if not args.target:
+        if args.non_interactive:
+            console = Console()
+            error_text = Text()
+            error_text.append("❌ ", style="bold red")
+            error_text.append("NO TARGETS PROVIDED", style="bold red")
+            error_text.append("\n\n", style="white")
+            error_text.append(
+                "Non-interactive mode requires at least one target to be specified.\n",
+                style="white",
+            )
+            error_text.append(
+                "Please provide a target using --target or -t option.\n\n", style="white"
+            )
+            error_text.append("Example:\n", style="white")
+            error_text.append("  strix -n --target https://example.com\n", style="dim white")
+            error_text.append("  strix -n -t ./local-directory\n", style="dim white")
+
+            panel = Panel(
+                error_text,
+                title="[bold red]🛡️  STRIX CONFIGURATION ERROR",
+                title_align="center",
+                border_style="red",
+                padding=(1, 2),
+            )
+
+            console.print("\n")
+            console.print(panel)
+            console.print()
+            sys.exit(1)
+
         args = show_interactive_menu()
         # Handle cancellation - if user quits menu, exit cleanly
         if args is None:
