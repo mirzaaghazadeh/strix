@@ -1,6 +1,7 @@
 """Interactive menu applications for Strix."""
 
 import argparse
+import asyncio
 import sys
 from typing import Any
 
@@ -528,6 +529,4 @@ async def show_interactive_menu_async() -> argparse.Namespace | None:  # noqa: P
 
 def show_interactive_menu() -> argparse.Namespace | None:
     """Display an interactive menu using textual with arrow key navigation."""
-    import asyncio
-
     return asyncio.run(show_interactive_menu_async())
